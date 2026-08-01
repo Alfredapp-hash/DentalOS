@@ -33,3 +33,5 @@ export interface ProviderRegistry {
   observability: ObservabilityProvider;
   ai: AIProvider;
 }
+
+export * from './dental-pms.js';
