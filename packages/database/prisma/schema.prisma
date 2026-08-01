@@ -1,0 +1,205 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum LeadStatus { NEW CONTACTED SCHEDULED COMPLETED LOST NURTURE }
+enum OpportunityType { NEW_PATIENT UNSCHEDULED_TREATMENT RECALL REACTIVATION SCHEDULE_GAP BALANCE INSURANCE REFERRAL }
+enum OpportunityStage { OPEN CONTACTING QUALIFIED PENDING ACCEPTED SCHEDULED COMPLETED DECLINED DEFERRED LOST }
+enum TaskStatus { OPEN IN_PROGRESS COMPLETED CANCELED }
+enum Channel { PHONE SMS EMAIL WEB CHAT INTERNAL }
+enum ConsentType { SMS EMAIL CALL RECORDING MARKETING }
+enum SyncStatus { PENDING RUNNING SUCCEEDED FAILED PARTIAL }
+
+model Organization {
+  id        String     @id @default(cuid())
+  name      String
+  slug      String     @unique
+  createdAt DateTime   @default(now())
+  updatedAt DateTime   @updatedAt
+  locations Location[]
+  patients  Patient[]
+  leads     Lead[]
+  users     User[]
+  integrations Integration[]
+}
+
+model Location {
+  id             String   @id @default(cuid())
+  organizationId String
+  name           String
+  timezone       String   @default("America/Los_Angeles")
+  createdAt      DateTime @default(now())
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  patients       Patient[]
+  leads          Lead[]
+  opportunities  Opportunity[]
+  @@unique([organizationId, name])
+}
+
+model User {
+  id             String   @id @default(cuid())
+  organizationId String
+  externalAuthId String   @unique
+  email          String
+  displayName    String
+  role           String
+  active         Boolean  @default(true)
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  tasks          Task[]
+  @@unique([organizationId, email])
+}
+
+model Patient {
+  id               String   @id @default(cuid())
+  organizationId   String
+  locationId       String?
+  externalPatientId String?
+  firstName        String
+  lastName         String
+  email            String?
+  phone            String?
+  dateOfBirth      DateTime?
+  preferredLanguage String? @default("en")
+  source           String?
+  lifetimeProduction Decimal @default(0) @db.Decimal(12,2)
+  lifetimeCollections Decimal @default(0) @db.Decimal(12,2)
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+  organization     Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  location         Location? @relation(fields: [locationId], references: [id])
+  opportunities    Opportunity[]
+  conversations    Conversation[]
+  tasks            Task[]
+  consents         Consent[]
+  @@unique([organizationId, externalPatientId])
+  @@index([organizationId, lastName, firstName])
+}
+
+model Lead {
+  id             String     @id @default(cuid())
+  organizationId String
+  locationId     String?
+  firstName      String?
+  lastName       String?
+  email          String?
+  phone          String?
+  source         String?
+  campaign       String?
+  status         LeadStatus @default(NEW)
+  assignedToId   String?
+  lostReason     String?
+  firstResponseAt DateTime?
+  createdAt      DateTime   @default(now())
+  updatedAt      DateTime   @updatedAt
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  location       Location? @relation(fields: [locationId], references: [id])
+  opportunities  Opportunity[]
+  @@index([organizationId, status, createdAt])
+}
+
+model Opportunity {
+  id             String   @id @default(cuid())
+  organizationId String
+  locationId     String?
+  patientId      String?
+  leadId         String?
+  type           OpportunityType
+  stage          OpportunityStage @default(OPEN)
+  title          String
+  value          Decimal @default(0) @db.Decimal(12,2)
+  probability    Int @default(25)
+  ownerId        String?
+  nextAction     String?
+  dueAt          DateTime?
+  lastActivityAt DateTime?
+  sourceSystem   String?
+  sourceRecordId String?
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+  location       Location? @relation(fields: [locationId], references: [id])
+  patient        Patient? @relation(fields: [patientId], references: [id])
+  lead           Lead? @relation(fields: [leadId], references: [id])
+  tasks          Task[]
+  @@index([organizationId, type, stage])
+  @@index([organizationId, dueAt])
+}
+
+model Task {
+  id             String @id @default(cuid())
+  organizationId String
+  patientId      String?
+  opportunityId  String?
+  assigneeId     String?
+  title          String
+  description    String?
+  status         TaskStatus @default(OPEN)
+  priority       Int @default(3)
+  financialValue Decimal @default(0) @db.Decimal(12,2)
+  dueAt          DateTime?
+  completedAt    DateTime?
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+  patient        Patient? @relation(fields: [patientId], references: [id])
+  opportunity    Opportunity? @relation(fields: [opportunityId], references: [id])
+  assignee       User? @relation(fields: [assigneeId], references: [id])
+  @@index([organizationId, status, dueAt])
+}
+
+model Conversation {
+  id             String @id @default(cuid())
+  organizationId String
+  patientId      String?
+  channel        Channel
+  externalId     String?
+  direction      String
+  subject        String?
+  body           String?
+  occurredAt     DateTime @default(now())
+  patient        Patient? @relation(fields: [patientId], references: [id])
+  @@index([organizationId, patientId, occurredAt])
+}
+
+model Consent {
+  id             String @id @default(cuid())
+  patientId      String
+  type           ConsentType
+  granted        Boolean
+  source         String
+  capturedAt     DateTime @default(now())
+  revokedAt      DateTime?
+  patient        Patient @relation(fields: [patientId], references: [id], onDelete: Cascade)
+  @@index([patientId, type, capturedAt])
+}
+
+model Integration {
+  id             String @id @default(cuid())
+  organizationId String
+  provider       String
+  status         String @default("inactive")
+  config         Json @default("{}")
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  syncRuns       SyncRun[]
+  @@unique([organizationId, provider])
+}
+
+model SyncRun {
+  id             String @id @default(cuid())
+  integrationId  String
+  resourceType   String
+  cursor         String?
+  status         SyncStatus @default(PENDING)
+  recordsRead    Int @default(0)
+  recordsWritten Int @default(0)
+  errorSummary   String?
+  startedAt      DateTime @default(now())
+  completedAt    DateTime?
+  integration    Integration @relation(fields: [integrationId], references: [id], onDelete: Cascade)
+  @@index([integrationId, startedAt])
+}
